@@ -1,0 +1,5 @@
+# Keep LF endings in the tree and in checkouts.  GIMP reads the shebang of
+# the plug-in entry point on Linux and macOS, and a CRLF there stops it
+# running.
+* text=auto eol=lf
+*.png binary

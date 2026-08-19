@@ -1,0 +1,27 @@
+GIMP Segment Anything Select
+============================
+
+This folder is a GIMP 3 plug-in. Copy the whole "segment-anything" folder
+into your GIMP plug-ins directory:
+
+  Linux     ~/.config/GIMP/3.0/plug-ins/
+  macOS     ~/Library/Application Support/GIMP/3.0/plug-ins/
+  Windows   %APPDATA%\GIMP\3.0\plug-ins\
+
+Use the version number your GIMP reports; 3.2 has its own folder. GIMP shows
+the exact path under Edit > Preferences > Folders > Plug-ins.
+
+Restart GIMP, open an image, and choose:
+
+  Select > Segment Anything...
+
+The first run offers to download the model runtime, 1-4 GB depending on the
+model, into a folder of its own. Nothing is installed system-wide.
+
+On Linux and macOS "segment-anything.py" must stay executable. Any normal
+unzip tool keeps it that way. If the menu entry does not appear, run:
+
+  chmod +x segment-anything.py
+
+Licence: GPL-3.0-or-later, see LICENSE.
+Home:    https://github.com/a904guy/GIMP-Segment-Anything-Select

@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No actions/setup-python here on purpose. The tests need PyGObject and
+      # the GTK typelibs, which only exist as system packages, so everything
+      # has to run on the system interpreter that apt installs into.
+      - name: Install the test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi python3-gi-cairo python3-cairo \
+            gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 \
+            python3-numpy python3-pil xvfb zip
+
+      - name: Show what the tests will run against
+        run: |
+          /usr/bin/python3 -VV
+          /usr/bin/python3 - <<'PY'
+          import gi, numpy, cairo
+          from PIL import Image
+          gi.require_version("Gtk", "3.0")
+          from gi.repository import Gtk
+          print("pygobject", gi.__version__)
+          print("gtk       ", Gtk.get_major_version(), Gtk.get_minor_version())
+          print("numpy     ", numpy.__version__)
+          print("pillow    ", Image.__version__ if hasattr(Image, "__version__") else "ok")
+          print("pycairo   ", cairo.version)
+          PY
+
+      - name: Check everything compiles
+        run: /usr/bin/python3 -m compileall -q plug-ins install.py
+
+      - name: Run the tests that need no GPU and no model weights
+        run: xvfb-run -a /usr/bin/python3 tests/run.py
+
+      - name: Assemble the plug-in zip
+        id: package
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          case "$version" in refs/*|"") version="dev" ;; esac
+          name="gimp-segment-anything-select-${version}"
+
+          mkdir -p staging
+          cp -r plug-ins/segment-anything staging/
+          find staging -name '__pycache__' -type d -prune -exec rm -rf {} +
+          find staging -name '*.py[co]' -delete
+          cp LICENSE staging/segment-anything/LICENSE
+          cp docs/INSTALL.txt staging/segment-anything/INSTALL.txt
+          # GIMP will not load a plug-in whose entry point is not executable
+          chmod +x staging/segment-anything/segment-anything.py
+
+          (cd staging && zip -qr "../${name}.zip" segment-anything)
+          sha256sum "${name}.zip" > SHA256SUMS
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the artifact is installable
+        run: |
+          set -eu
+          name="${{ steps.package.outputs.name }}"
+          mkdir -p verify && unzip -q "${name}.zip" -d verify
+          entry=verify/segment-anything/segment-anything.py
+          test -x "$entry" || { echo "::error::entry point lost its executable bit"; exit 1; }
+          for required in \
+              verify/segment-anything/samgimp/dialog_main.py \
+              verify/segment-anything/backend/sam_server.py \
+              verify/segment-anything/LICENSE \
+              verify/segment-anything/INSTALL.txt; do
+            test -f "$required" || { echo "::error::missing $required"; exit 1; }
+          done
+          if find verify -name '__pycache__' -o -name '*.pyc' | grep -q .; then
+            echo "::error::build leftovers made it into the zip"; exit 1
+          fi
+          echo "artifact verified:"
+          unzip -l "${name}.zip" | tail -3
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plug-in-zip
+          path: |
+            *.zip
+            SHA256SUMS
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.zip
+            SHA256SUMS
+          body: |
+            Download the zip, extract it, and copy the `segment-anything`
+            folder into your GIMP plug-ins directory:
+
+            | | |
+            | --- | --- |
+            | Linux | `~/.config/GIMP/3.0/plug-ins/` |
+            | macOS | `~/Library/Application Support/GIMP/3.0/plug-ins/` |
+            | Windows | `%APPDATA%\GIMP\3.0\plug-ins\` |
+
+            Use whichever version your GIMP reports; 3.2 keeps its own folder,
+            and the exact path is shown under
+            *Edit > Preferences > Folders > Plug-ins*.
+
+            Restart GIMP, then open an image and choose
+            **Select > Segment Anything...**. The first run offers to download
+            the model runtime.
